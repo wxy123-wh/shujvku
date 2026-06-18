@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}成员管理{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div>
+    <h1>{{ tree.tree_name }} 成员管理</h1>
+    <p class="muted">总人数：{{ total }}；当前列表最多显示 200 条。</p>
+  </div>
+  <a class="button" href="{{ url_for('member_new', tree_id=tree.tree_id) }}">新增成员</a>
+</div>
+
+<div class="subnav">
+  <a href="{{ url_for('tree_preview', tree_id=tree.tree_id) }}">树形预览</a>
+  <a href="{{ url_for('ancestors', tree_id=tree.tree_id) }}">祖先查询</a>
+  <a href="{{ url_for('relationship', tree_id=tree.tree_id) }}">亲缘查询</a>
+</div>
+
+<form method="get" class="search-form">
+  <input name="q" value="{{ keyword }}" placeholder="输入姓名关键字">
+  <button type="submit">模糊搜索</button>
+  {% if keyword %}<a href="{{ url_for('members', tree_id=tree.tree_id) }}">清空</a>{% endif %}
+</form>
+
+<table>
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>姓名</th>
+      <th>性别</th>
+      <th>生年</th>
+      <th>卒年</th>
+      <th>辈分</th>
+      <th>子女数</th>
+      <th>操作</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for member in members %}
+      <tr>
+        <td>{{ member.member_id }}</td>
+        <td>{{ member.name }}</td>
+        <td>{{ "男" if member.gender == "M" else "女" }}</td>
+        <td>{{ member.birth_year }}</td>
+        <td>{{ member.death_year or "" }}</td>
+        <td>{{ member.generation }}</td>
+        <td>{{ member.child_count }}</td>
+        <td class="actions">
+          <a href="{{ url_for('member_edit', tree_id=tree.tree_id, member_id=member.member_id) }}">编辑</a>
+          <a href="{{ url_for('tree_preview', tree_id=tree.tree_id, root_id=member.member_id) }}">后代</a>
+          <a href="{{ url_for('ancestors', tree_id=tree.tree_id, member_id=member.member_id) }}">祖先</a>
+          <form method="post" action="{{ url_for('member_delete', tree_id=tree.tree_id, member_id=member.member_id) }}" onsubmit="return confirm('确定删除该成员？')">
+            <button class="link-button" type="submit">删除</button>
+          </form>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="8" class="empty">没有找到成员</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

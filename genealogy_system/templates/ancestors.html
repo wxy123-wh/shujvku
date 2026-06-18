@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}祖先查询{% endblock %}
+{% block content %}
+<h1>{{ tree.tree_name }} 祖先查询</h1>
+<form method="get" class="search-form">
+  <input name="member_id" type="number" value="{{ member_id or '' }}" placeholder="成员 ID" required>
+  <button type="submit">查询祖先</button>
+</form>
+
+{% if target %}
+  <h2>目标成员：#{{ target.member_id }} {{ target.name }}</h2>
+{% endif %}
+
+<table>
+  <thead>
+    <tr>
+      <th>距离</th>
+      <th>ID</th>
+      <th>姓名</th>
+      <th>关系</th>
+      <th>性别</th>
+      <th>生卒年</th>
+      <th>辈分</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+      <tr>
+        <td>{{ row.distance }}</td>
+        <td>{{ row.member_id }}</td>
+        <td>{{ row.name }}</td>
+        <td>{{ "父亲" if row.relation_type == "father" else "母亲" }}</td>
+        <td>{{ "男" if row.gender == "M" else "女" }}</td>
+        <td>{{ row.birth_year }}{% if row.death_year %}-{{ row.death_year }}{% endif %}</td>
+        <td>{{ row.generation }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="7" class="empty">暂无祖先查询结果</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

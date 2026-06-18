@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}亲缘关系查询{% endblock %}
+{% block content %}
+<h1>{{ tree.tree_name }} 亲缘关系查询</h1>
+<form method="get" class="search-form">
+  <input name="member_a_id" type="number" value="{{ member_a_id or '' }}" placeholder="成员 A ID" required>
+  <input name="member_b_id" type="number" value="{{ member_b_id or '' }}" placeholder="成员 B ID" required>
+  <button type="submit">查询通路</button>
+</form>
+
+{% if target_a and target_b %}
+  <p class="muted">A：#{{ target_a.member_id }} {{ target_a.name }}；B：#{{ target_b.member_id }} {{ target_b.name }}</p>
+{% endif %}
+
+{% if result %}
+  <h2>最短通路：{{ result.depth }} 步</h2>
+  <ol class="path-list">
+    {% for member in path_members %}
+      <li>
+        <span class="node-id">#{{ member.member_id }}</span>
+        <strong>{{ member.name }}</strong>
+        <span class="muted">第 {{ member.generation }} 代，{{ "男" if member.gender == "M" else "女" }}</span>
+        {% if not loop.last %}
+          <span class="edge-label">{{ result.edge_labels[loop.index0] }}</span>
+        {% endif %}
+      </li>
+    {% endfor %}
+  </ol>
+{% else %}
+  <p class="empty">输入两个成员 ID 后显示亲缘链路。</p>
+{% endif %}
+{% endblock %}

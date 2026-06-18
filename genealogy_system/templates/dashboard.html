@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <h1>Dashboard</h1>
+  <a class="button" href="{{ url_for('tree_new') }}">新增族谱</a>
+</div>
+
+<div class="stats-grid">
+  <div class="stat"><span>可见族谱</span><strong>{{ stats.tree_count or 0 }}</strong></div>
+  <div class="stat"><span>总人数</span><strong>{{ stats.member_count or 0 }}</strong></div>
+  <div class="stat"><span>男女比例</span><strong>{{ stats.gender_ratio or "0:0" }}</strong></div>
+  <div class="stat"><span>男性</span><strong>{{ stats.male_count or 0 }}</strong></div>
+  <div class="stat"><span>女性</span><strong>{{ stats.female_count or 0 }}</strong></div>
+</div>
+
+<h2>最近族谱</h2>
+<table>
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>谱名</th>
+      <th>姓氏</th>
+      <th>角色</th>
+      <th>人数</th>
+      <th>操作</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for tree in trees %}
+      <tr>
+        <td>{{ tree.tree_id }}</td>
+        <td>{{ tree.tree_name }}</td>
+        <td>{{ tree.surname }}</td>
+        <td>{{ tree.current_role }}</td>
+        <td>{{ tree.member_count }}</td>
+        <td><a href="{{ url_for('members', tree_id=tree.tree_id) }}">成员</a></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="empty">暂无族谱</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

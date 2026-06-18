@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}树形预览{% endblock %}
+{% block content %}
+<h1>{{ tree.tree_name }} 树形预览</h1>
+<form method="get" class="search-form">
+  <input name="root_id" type="number" value="{{ root_id or '' }}" placeholder="根成员 ID">
+  <input name="depth" type="number" min="1" max="8" value="{{ depth }}">
+  <button type="submit">预览</button>
+</form>
+
+<div class="tree-list">
+  {% for row in rows %}
+    <div class="tree-row" style="padding-left: {{ row.depth * 28 }}px">
+      <span class="node-id">#{{ row.member_id }}</span>
+      <strong>{{ row.name }}</strong>
+      <span class="muted">第 {{ row.generation }} 代，{{ "男" if row.gender == "M" else "女" }}，{{ row.birth_year }}{% if row.death_year %}-{{ row.death_year }}{% endif %}</span>
+    </div>
+  {% else %}
+    <p class="empty">没有可展示的成员。</p>
+  {% endfor %}
+</div>
+{% endblock %}

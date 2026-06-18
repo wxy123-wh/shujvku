@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}成员表单{% endblock %}
+{% block content %}
+<h1>{{ "编辑成员" if member.member_id else "新增成员" }}</h1>
+<p class="muted">族谱：{{ tree.tree_name }}</p>
+
+<form method="post" class="form wide-form">
+  <label>姓名
+    <input name="name" value="{{ member.name or '' }}" required>
+  </label>
+  <label>性别
+    <select name="gender">
+      <option value="M" {% if member.gender == "M" %}selected{% endif %}>男 M</option>
+      <option value="F" {% if member.gender == "F" %}selected{% endif %}>女 F</option>
+    </select>
+  </label>
+  <label>出生年份
+    <input name="birth_year" type="number" value="{{ member.birth_year or '' }}" required>
+  </label>
+  <label>死亡年份
+    <input name="death_year" type="number" value="{{ member.death_year or '' }}">
+  </label>
+  <label>辈分
+    <input name="generation" type="number" min="1" value="{{ member.generation or 1 }}" required>
+  </label>
+  <label>父亲 ID
+    <input name="father_id" type="number" value="{{ relations.father_id or '' }}">
+  </label>
+  <label>母亲 ID
+    <input name="mother_id" type="number" value="{{ relations.mother_id or '' }}">
+  </label>
+  <label>配偶 ID
+    <input name="spouse_id" type="number" value="{{ relations.spouse_id or '' }}">
+  </label>
+  <label>结婚年份
+    <input name="marriage_year" type="number" value="{{ relations.marriage_year or '' }}">
+  </label>
+  <label class="full">生平简介
+    <textarea name="biography" rows="4">{{ member.biography or '' }}</textarea>
+  </label>
+  <button type="submit">保存</button>
+  <a href="{{ url_for('members', tree_id=tree.tree_id) }}">返回成员列表</a>
+</form>
+{% endblock %}

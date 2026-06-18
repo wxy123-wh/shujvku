@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}族谱表单{% endblock %}
+{% block content %}
+<h1>{{ "编辑族谱" if tree.tree_id else "新增族谱" }}</h1>
+<form method="post" class="form">
+  <label>谱名
+    <input name="tree_name" value="{{ tree.tree_name or '' }}" required>
+  </label>
+  <label>姓氏
+    <input name="surname" value="{{ tree.surname or '' }}" required>
+  </label>
+  <label>修谱时间
+    <input name="revision_time" type="date" value="{{ tree.revision_time or '' }}">
+  </label>
+  <button type="submit">保存</button>
+</form>
+{% endblock %}
