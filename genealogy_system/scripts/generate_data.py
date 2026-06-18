@@ -95,6 +95,49 @@ def build_users() -> tuple[list[dict[str, object]], str]:
     return users, password_hash
 
 
+def member_id(member: dict[str, object]) -> int:
+    return int(member["member_id"])
+
+
+def spouse_pair(first: dict[str, object], second: dict[str, object]) -> tuple[int, int]:
+    return tuple(sorted((member_id(first), member_id(second))))
+
+
+def can_marry(
+    first: dict[str, object],
+    second: dict[str, object],
+    parent_sets: dict[int, set[int]],
+    existing_pairs: set[tuple[int, int]],
+) -> bool:
+    first_id, second_id = spouse_pair(first, second)
+    if first_id == second_id or (first_id, second_id) in existing_pairs:
+        return False
+    if first["gender"] == second["gender"]:
+        return False
+    return not (parent_sets.get(first_id, set()) & parent_sets.get(second_id, set()))
+
+
+def build_spouse_couples(
+    generation_members: list[dict[str, object]],
+    parent_sets: dict[int, set[int]],
+    existing_pairs: set[tuple[int, int]],
+) -> list[tuple[dict[str, object], dict[str, object]]]:
+    males = [item for item in generation_members if item["gender"] == "M"]
+    females = [item for item in generation_members if item["gender"] == "F"]
+    couples: list[tuple[dict[str, object], dict[str, object]]] = []
+    if not males or not females:
+        return couples
+
+    for index, male in enumerate(males):
+        for shift in range(len(females)):
+            female = females[(index + shift) % len(females)]
+            if can_marry(male, female, parent_sets, existing_pairs):
+                couples.append((male, female))
+                existing_pairs.add(spouse_pair(male, female))
+                break
+    return couples
+
+
 def generate(seed: int = 20260618) -> None:
     random.seed(seed)
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -141,7 +184,8 @@ def generate(seed: int = 20260618) -> None:
         )
 
         generation_counts = distribute_generation_counts(tree_size, generation_count)
-        previous_generation: list[dict[str, object]] = []
+        previous_couples: list[tuple[dict[str, object], dict[str, object]]] = []
+        parent_sets: dict[int, set[int]] = {}
         marriage_pairs: set[tuple[int, int]] = set()
 
         for generation, generation_size in enumerate(generation_counts, start=1):
@@ -168,12 +212,11 @@ def generate(seed: int = 20260618) -> None:
                 }
                 members.append(member)
                 current_generation.append(member)
+                parent_sets[member_id(member)] = set()
 
-                if previous_generation:
-                    fathers = [item for item in previous_generation if item["gender"] == "M"]
-                    mothers = [item for item in previous_generation if item["gender"] == "F"]
-                    father = fathers[index % len(fathers)]
-                    mother = mothers[(index // max(1, len(fathers))) % len(mothers)]
+                if previous_couples:
+                    father, mother = previous_couples[index % len(previous_couples)]
+                    parent_sets[member_id(member)] = {member_id(father), member_id(mother)}
 
                     parent_child.append(
                         {
@@ -190,45 +233,23 @@ def generate(seed: int = 20260618) -> None:
                         }
                     )
 
-                    spouse1_id, spouse2_id = sorted((int(father["member_id"]), int(mother["member_id"])))
-                    pair = (spouse1_id, spouse2_id)
-                    if pair not in marriage_pairs:
-                        marriage_pairs.add(pair)
-                        marriages.append(
-                            {
-                                "marriage_id": next_marriage_id,
-                                "tree_id": tree_index,
-                                "spouse1_id": spouse1_id,
-                                "spouse2_id": spouse2_id,
-                                "marriage_year": min(int(father["birth_year"]), int(mother["birth_year"])) + 22,
-                            }
-                        )
-                        next_marriage_id += 1
-
                 next_member_id += 1
 
-            # Add spouse links for root generation so every root member has a direct relationship.
-            if generation == 1:
-                males = [item for item in current_generation if item["gender"] == "M"]
-                females = [item for item in current_generation if item["gender"] == "F"]
-                for index, male in enumerate(males):
-                    female = females[index % len(females)]
-                    spouse1_id, spouse2_id = sorted((int(male["member_id"]), int(female["member_id"])))
-                    pair = (spouse1_id, spouse2_id)
-                    if pair not in marriage_pairs:
-                        marriage_pairs.add(pair)
-                        marriages.append(
-                            {
-                                "marriage_id": next_marriage_id,
-                                "tree_id": tree_index,
-                                "spouse1_id": spouse1_id,
-                                "spouse2_id": spouse2_id,
-                                "marriage_year": min(int(male["birth_year"]), int(female["birth_year"])) + 22,
-                            }
-                        )
-                        next_marriage_id += 1
+            current_couples = build_spouse_couples(current_generation, parent_sets, marriage_pairs)
+            for spouse1, spouse2 in current_couples:
+                spouse1_id, spouse2_id = spouse_pair(spouse1, spouse2)
+                marriages.append(
+                    {
+                        "marriage_id": next_marriage_id,
+                        "tree_id": tree_index,
+                        "spouse1_id": spouse1_id,
+                        "spouse2_id": spouse2_id,
+                        "marriage_year": min(int(spouse1["birth_year"]), int(spouse2["birth_year"])) + 22,
+                    }
+                )
+                next_marriage_id += 1
 
-            previous_generation = current_generation
+            previous_couples = current_couples
 
     write_csv(DATA_DIR / "users.csv", ["user_id", "username", "password_hash", "created_at"], users)
     write_csv(

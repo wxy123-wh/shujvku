@@ -13,19 +13,56 @@
 {% endif %}
 
 {% if result %}
-  <h2>最短通路：{{ result.depth }} 步</h2>
-  <ol class="path-list">
-    {% for member in path_members %}
-      <li>
-        <span class="node-id">#{{ member.member_id }}</span>
-        <strong>{{ member.name }}</strong>
-        <span class="muted">第 {{ member.generation }} 代，{{ "男" if member.gender == "M" else "女" }}</span>
-        {% if not loop.last %}
-          <span class="edge-label">{{ result.edge_labels[loop.index0] }}</span>
-        {% endif %}
-      </li>
-    {% endfor %}
-  </ol>
+  <section class="relationship-result">
+    <div class="result-summary">
+      <span class="summary-label">查询结论</span>
+      <strong>{{ relationship_summary }}</strong>
+      <span class="muted">最短通路：{{ result.depth }} 步</span>
+    </div>
+
+    {% if relationship_steps %}
+      <div class="path-diagram">
+        {% for step in relationship_steps %}
+          {% if loop.first %}
+            <div class="path-node">
+              <span class="node-id">#{{ step.from.member_id }}</span>
+              <strong>{{ step.from.name }}</strong>
+              <span>第 {{ step.from.generation }} 代，{{ "男" if step.from.gender == "M" else "女" }}</span>
+            </div>
+          {% endif %}
+          <div class="path-arrow {{ step.kind }}">
+            <span>{{ step.label }}</span>
+          </div>
+          <div class="path-node">
+            <span class="node-id">#{{ step.to.member_id }}</span>
+            <strong>{{ step.to.name }}</strong>
+            <span>第 {{ step.to.generation }} 代，{{ "男" if step.to.gender == "M" else "女" }}</span>
+          </div>
+        {% endfor %}
+      </div>
+
+      <h2>逐步说明</h2>
+      <ol class="step-list">
+        {% for step in relationship_steps %}
+          <li>{{ step.description }}</li>
+        {% endfor %}
+      </ol>
+    {% else %}
+      <div class="path-node single-node">
+        <span class="node-id">#{{ path_members[0].member_id }}</span>
+        <strong>{{ path_members[0].name }}</strong>
+        <span>第 {{ path_members[0].generation }} 代，{{ "男" if path_members[0].gender == "M" else "女" }}</span>
+      </div>
+    {% endif %}
+  </section>
+{% elif no_relationship_message %}
+  <section class="relationship-result">
+    <div class="result-summary">
+      <span class="summary-label">查询结论</span>
+      <strong>{{ no_relationship_message }}</strong>
+      <span class="muted">系统当前查询直接配偶关系，以及通过父母子女关系向上追溯得到的共同祖先血缘关系。</span>
+    </div>
+  </section>
 {% else %}
   <p class="empty">输入两个成员 ID 后显示亲缘链路。</p>
 {% endif %}

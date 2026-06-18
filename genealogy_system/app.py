@@ -27,6 +27,7 @@ DATABASE_URL = os.getenv(
     "postgresql://postgres:postgres@localhost:5432/genealogy_db",
 )
 PAGE_SIZE_OPTIONS = [10, 20, 50, 100, 200, 500, 1000, 2000]
+RELATION_ANCESTOR_DEPTH = 12
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.getenv("FLASK_SECRET_KEY", "dev-secret-change-me")
@@ -181,6 +182,131 @@ def fetch_member(tree_id: int, member_id: int) -> dict[str, Any] | None:
         """,
         (tree_id, member_id),
     )
+
+
+def describe_relationship_steps(tree_id: int, path_members: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    steps: list[dict[str, Any]] = []
+    for index in range(len(path_members) - 1):
+        current = path_members[index]
+        next_member = path_members[index + 1]
+        current_id = current["member_id"]
+        next_id = next_member["member_id"]
+
+        direct_parent_child = query_one(
+            """
+            SELECT relation_type, parent_id, child_id
+            FROM parent_child
+            WHERE (parent_id = %s AND child_id = %s)
+               OR (parent_id = %s AND child_id = %s)
+            LIMIT 1
+            """,
+            (current_id, next_id, next_id, current_id),
+        )
+        shared_parent = query_one(
+            """
+            SELECT p.member_id, p.name
+            FROM parent_child pc1
+            JOIN parent_child pc2 ON pc2.parent_id = pc1.parent_id
+            JOIN members p ON p.member_id = pc1.parent_id
+            WHERE pc1.child_id = %s
+              AND pc2.child_id = %s
+            LIMIT 1
+            """,
+            (current_id, next_id),
+        )
+        marriage = query_one(
+            """
+            SELECT marriage_year
+            FROM marriages
+            WHERE tree_id = %s
+              AND spouse1_id = LEAST(%s, %s)
+              AND spouse2_id = GREATEST(%s, %s)
+            """,
+            (tree_id, current_id, next_id, current_id, next_id),
+        )
+        if marriage and (direct_parent_child or shared_parent):
+            if shared_parent:
+                detail = f"两人共享父母 {shared_parent['name']}"
+            else:
+                detail = "两人存在父母子女血缘"
+            steps.append(
+                {
+                    "from": current,
+                    "to": next_member,
+                    "label": "数据冲突",
+                    "kind": "conflict",
+                    "description": f"{current['name']} 与 {next_member['name']} 同时存在婚姻记录和血缘记录，{detail}，需要修正数据。",
+                }
+            )
+            continue
+        if marriage:
+            year_text = f"，结婚年份 {marriage['marriage_year']}" if marriage["marriage_year"] else ""
+            steps.append(
+                {
+                    "from": current,
+                    "to": next_member,
+                    "label": "夫妻",
+                    "kind": "spouse",
+                    "description": f"{current['name']} 与 {next_member['name']} 是夫妻关系{year_text}。",
+                }
+            )
+            continue
+
+        parent_to_child = direct_parent_child if direct_parent_child and direct_parent_child["parent_id"] == current_id else None
+        if parent_to_child:
+            parent_label = "父亲" if parent_to_child["relation_type"] == "father" else "母亲"
+            steps.append(
+                {
+                    "from": current,
+                    "to": next_member,
+                    "label": parent_label,
+                    "kind": "blood",
+                    "description": f"{current['name']} 是 {next_member['name']} 的{parent_label}。",
+                }
+            )
+            continue
+
+        child_to_parent = direct_parent_child if direct_parent_child and direct_parent_child["parent_id"] == next_id else None
+        if child_to_parent:
+            child_label = "儿子" if current["gender"] == "M" else "女儿"
+            parent_label = "父亲" if child_to_parent["relation_type"] == "father" else "母亲"
+            steps.append(
+                {
+                    "from": current,
+                    "to": next_member,
+                    "label": child_label,
+                    "kind": "blood",
+                    "description": f"{current['name']} 是 {next_member['name']} 的{child_label}，{next_member['name']} 是其{parent_label}。",
+                }
+            )
+            continue
+
+        steps.append(
+            {
+                "from": current,
+                "to": next_member,
+                "label": "亲缘",
+                "kind": "unknown",
+                "description": f"{current['name']} 与 {next_member['name']} 存在亲缘连接。",
+            }
+        )
+    return steps
+
+
+def relationship_summary(path_members: list[dict[str, Any]], steps: list[dict[str, Any]]) -> str:
+    if not path_members:
+        return ""
+    if len(path_members) == 1:
+        return "两个 ID 指向同一个成员。"
+    first = path_members[0]
+    last = path_members[-1]
+    if any(step["kind"] == "conflict" for step in steps):
+        return f"{first['name']} 与 {last['name']} 的数据存在冲突，请检查婚姻和血缘记录。"
+    if len(steps) == 1 and steps[0]["kind"] == "spouse":
+        return f"{first['name']} 与 {last['name']} 是夫妻关系。"
+    if steps and all(step["kind"] == "blood" for step in steps):
+        return f"{first['name']} 与 {last['name']} 存在血缘关系，共经过 {len(steps)} 步。"
+    return f"{first['name']} 与 {last['name']} 存在亲缘通路，共经过 {len(steps)} 步。"
 
 
 @app.route("/")
@@ -913,6 +1039,9 @@ def relationship(tree_id: int):
     member_b_id = parse_int(request.values.get("member_b_id"), "成员 B ID") if request.values.get("member_b_id") else None
     result = None
     path_members: list[dict[str, Any]] = []
+    relationship_steps: list[dict[str, Any]] = []
+    summary = ""
+    no_relationship_message = ""
     target_a = fetch_member(tree_id, member_a_id) if member_a_id else None
     target_b = fetch_member(tree_id, member_b_id) if member_b_id else None
 
@@ -948,7 +1077,7 @@ def relationship(tree_id: int):
                     FROM up_from_a
                     JOIN parent_child pc ON pc.child_id = up_from_a.current_id
                     JOIN members parent ON parent.member_id = pc.parent_id
-                    WHERE up_from_a.depth < 40
+                    WHERE up_from_a.depth < %s
                       AND parent.tree_id = %s
                       AND NOT pc.parent_id = ANY(up_from_a.path)
                 ),
@@ -967,7 +1096,7 @@ def relationship(tree_id: int):
                     FROM up_from_b
                     JOIN parent_child pc ON pc.child_id = up_from_b.current_id
                     JOIN members parent ON parent.member_id = pc.parent_id
-                    WHERE up_from_b.depth < 40
+                    WHERE up_from_b.depth < %s
                       AND parent.tree_id = %s
                       AND NOT pc.parent_id = ANY(up_from_b.path)
                 ),
@@ -1015,9 +1144,11 @@ def relationship(tree_id: int):
                     member_b_id,
                     member_a_id,
                     member_a_id,
+                    RELATION_ANCESTOR_DEPTH,
                     tree_id,
                     member_b_id,
                     member_b_id,
+                    RELATION_ANCESTOR_DEPTH,
                     tree_id,
                 ),
             )
@@ -1032,8 +1163,11 @@ def relationship(tree_id: int):
                 )
                 member_map = {row["member_id"]: row for row in member_rows}
                 path_members = [member_map[item] for item in result["path"] if item in member_map]
+                relationship_steps = describe_relationship_steps(tree_id, path_members)
+                summary = relationship_summary(path_members, relationship_steps)
             else:
-                flash("在 12 步以内没有找到亲缘通路。", "warning")
+                no_relationship_message = f"未找到直接配偶关系，也没有在 {RELATION_ANCESTOR_DEPTH} 代追溯范围内找到共同祖先血缘通路。"
+                flash(no_relationship_message, "warning")
 
     return render_template(
         "relationship.html",
@@ -1044,6 +1178,9 @@ def relationship(tree_id: int):
         target_b=target_b,
         result=result,
         path_members=path_members,
+        relationship_steps=relationship_steps,
+        relationship_summary=summary,
+        no_relationship_message=no_relationship_message,
     )
 
 

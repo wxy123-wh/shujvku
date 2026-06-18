@@ -299,6 +299,106 @@ th {
   color: var(--muted);
 }
 
+.relationship-result {
+  display: grid;
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.result-summary {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.summary-label {
+  width: fit-content;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #e8f0ff;
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.path-diagram {
+  display: flex;
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.path-node {
+  display: grid;
+  gap: 4px;
+  min-width: 180px;
+  padding: 12px;
+  background: #f8fafc;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.single-node {
+  width: fit-content;
+}
+
+.path-arrow {
+  display: grid;
+  align-items: center;
+  justify-items: center;
+  min-width: 86px;
+  color: var(--muted);
+  font-weight: 700;
+  position: relative;
+}
+
+.path-arrow::before,
+.path-arrow::after {
+  content: "";
+  display: block;
+  width: 100%;
+  border-top: 2px solid var(--line);
+}
+
+.path-arrow span {
+  margin: 5px 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #eef2f7;
+}
+
+.path-arrow.spouse span {
+  background: #ffe8ef;
+  color: #a11043;
+}
+
+.path-arrow.blood span {
+  background: #e9f8ef;
+  color: #067647;
+}
+
+.path-arrow.conflict span {
+  background: #fff1e5;
+  color: #b54708;
+}
+
+.step-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 16px 16px 16px 38px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
 @media (max-width: 760px) {
   .topbar,
   .page-heading {
@@ -322,5 +422,13 @@ th {
   table {
     display: block;
     overflow-x: auto;
+  }
+
+  .path-diagram {
+    display: grid;
+  }
+
+  .path-arrow {
+    min-height: 54px;
   }
 }

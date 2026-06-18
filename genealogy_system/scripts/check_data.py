@@ -61,12 +61,18 @@ def main() -> None:
         if count > 1:
             errors.append(f"child has duplicate parent type: {key}")
 
+    parents_by_child: dict[int, set[int]] = {}
+    parent_child_pairs: set[tuple[int, int]] = set()
     for row in parent_child:
-        parent = member_map.get(int(row["parent_id"]))
-        child = member_map.get(int(row["child_id"]))
+        parent_id = int(row["parent_id"])
+        child_id = int(row["child_id"])
+        parent = member_map.get(parent_id)
+        child = member_map.get(child_id)
         if not parent or not child:
             errors.append(f"parent_child member missing: {row}")
             continue
+        parents_by_child.setdefault(child_id, set()).add(parent_id)
+        parent_child_pairs.add((parent_id, child_id))
         if parent["tree_id"] != child["tree_id"]:
             errors.append(f"parent_child tree mismatch: {row}")
         if row["relation_type"] == "father" and parent["gender"] != "M":
@@ -93,6 +99,12 @@ def main() -> None:
             continue
         if spouse1["tree_id"] != spouse2["tree_id"] or spouse1["tree_id"] != row["tree_id"]:
             errors.append(f"marriage tree mismatch: {row}")
+        spouse1_id = int(row["spouse1_id"])
+        spouse2_id = int(row["spouse2_id"])
+        if (spouse1_id, spouse2_id) in parent_child_pairs or (spouse2_id, spouse1_id) in parent_child_pairs:
+            errors.append(f"marriage between parent and child: {row}")
+        if parents_by_child.get(spouse1_id, set()) & parents_by_child.get(spouse2_id, set()):
+            errors.append(f"marriage between siblings or half-siblings: {row}")
 
     by_tree = Counter(int(row["tree_id"]) for row in members)
     max_generation = {}

@@ -153,7 +153,7 @@ up_from_a AS (
         up_from_a.depth + 1
     FROM up_from_a
     JOIN parent_child pc ON pc.child_id = up_from_a.current_id
-    WHERE up_from_a.depth < 40
+    WHERE up_from_a.depth < 12
       AND NOT pc.parent_id = ANY(up_from_a.path)
 ),
 up_from_b AS (
@@ -170,7 +170,7 @@ up_from_b AS (
         up_from_b.depth + 1
     FROM up_from_b
     JOIN parent_child pc ON pc.child_id = up_from_b.current_id
-    WHERE up_from_b.depth < 40
+    WHERE up_from_b.depth < 12
       AND NOT pc.parent_id = ANY(up_from_b.path)
 ),
 blood_path AS (

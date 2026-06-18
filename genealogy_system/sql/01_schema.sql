@@ -126,6 +126,25 @@ BEGIN
         RAISE EXCEPTION 'both spouses must belong to the marriage family tree';
     END IF;
 
+    IF EXISTS (
+        SELECT 1
+        FROM parent_child pc
+        WHERE (pc.parent_id = NEW.spouse1_id AND pc.child_id = NEW.spouse2_id)
+           OR (pc.parent_id = NEW.spouse2_id AND pc.child_id = NEW.spouse1_id)
+    ) THEN
+        RAISE EXCEPTION 'spouses cannot be parent and child';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM parent_child pc1
+        JOIN parent_child pc2 ON pc2.parent_id = pc1.parent_id
+        WHERE pc1.child_id = NEW.spouse1_id
+          AND pc2.child_id = NEW.spouse2_id
+    ) THEN
+        RAISE EXCEPTION 'spouses cannot share a parent';
+    END IF;
+
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
