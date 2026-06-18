@@ -227,6 +227,31 @@ th {
   margin: 16px 0;
 }
 
+.filter-form {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 150px 120px auto auto;
+  align-items: end;
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.compact-filter {
+  grid-template-columns: 150px 120px auto;
+  justify-content: start;
+}
+
+.preview-filter {
+  grid-template-columns: minmax(180px, 1fr) 100px 150px 120px auto;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 12px 0 16px;
+}
+
 .subnav {
   display: flex;
   flex-wrap: wrap;
@@ -287,6 +312,7 @@ th {
   }
 
   .search-form,
+  .filter-form,
   .inline-form {
     align-items: stretch;
     flex-direction: column;

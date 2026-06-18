@@ -26,6 +26,7 @@ DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql://postgres:postgres@localhost:5432/genealogy_db",
 )
+PAGE_SIZE_OPTIONS = [10, 20, 50, 100, 200, 500, 1000, 2000]
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.getenv("FLASK_SECRET_KEY", "dev-secret-change-me")
@@ -137,6 +138,34 @@ def parse_int(value: str | None, field_name: str, required: bool = False) -> int
         raise ValueError(f"{field_name}必须是整数。") from exc
 
 
+def get_pagination(default_size: int = 200) -> tuple[int, int]:
+    try:
+        page = int(request.args.get("page", "1") or 1)
+    except ValueError:
+        page = 1
+    try:
+        page_size = int(request.args.get("page_size", str(default_size)) or default_size)
+    except ValueError:
+        page_size = default_size
+    page = max(page, 1)
+    page_size = min(max(page_size, min(PAGE_SIZE_OPTIONS)), max(PAGE_SIZE_OPTIONS))
+    return page, page_size
+
+
+def pagination_context(total_count: int, page: int, page_size: int, row_count: int) -> dict[str, int | list[int]]:
+    total_pages = max((total_count + page_size - 1) // page_size, 1)
+    page = min(max(page, 1), total_pages)
+    offset = (page - 1) * page_size
+    return {
+        "page": page,
+        "page_size": page_size,
+        "page_size_options": PAGE_SIZE_OPTIONS,
+        "total_pages": total_pages,
+        "start_row": offset + 1 if total_count else 0,
+        "end_row": min(offset + row_count, total_count),
+    }
+
+
 def normalize_pair(first_id: int, second_id: int) -> tuple[int, int]:
     if first_id == second_id:
         raise ValueError("配偶不能是自己。")
@@ -222,6 +251,7 @@ def logout():
 @login_required
 def dashboard():
     user_id = session["user_id"]
+    page, page_size = get_pagination(default_size=20)
     stats = query_one(
         """
         WITH visible_trees AS (
@@ -246,6 +276,20 @@ def dashboard():
         male_count = stats.get("male_count") or 0
         female_count = stats.get("female_count") or 0
         stats["gender_ratio"] = f"{male_count}:{female_count}" if male_count or female_count else "0:0"
+    tree_total = query_one(
+        """
+        SELECT COUNT(DISTINCT t.tree_id) AS count
+        FROM family_trees t
+        LEFT JOIN tree_collaborators tc
+          ON tc.tree_id = t.tree_id
+         AND tc.user_id = %s
+        WHERE t.creator_user_id = %s OR tc.user_id = %s
+        """,
+        (user_id, user_id, user_id),
+    )
+    tree_count = tree_total["count"] if tree_total else 0
+    page_info = pagination_context(tree_count, page, page_size, 0)
+    offset = (page_info["page"] - 1) * page_size
     trees = query_all(
         """
         SELECT
@@ -263,17 +307,33 @@ def dashboard():
         WHERE t.creator_user_id = %s OR tc.user_id = %s
         GROUP BY t.tree_id, tc.role
         ORDER BY t.tree_id
-        LIMIT 20
+        LIMIT %s OFFSET %s
         """,
-        (user_id, user_id, user_id, user_id),
+        (user_id, user_id, user_id, user_id, page_size, offset),
     )
-    return render_template("dashboard.html", stats=stats or {}, trees=trees)
+    page_info = pagination_context(tree_count, int(page_info["page"]), page_size, len(trees))
+    return render_template("dashboard.html", stats=stats or {}, trees=trees, tree_count=tree_count, **page_info)
 
 
 @app.route("/trees")
 @login_required
 def trees():
     user_id = session["user_id"]
+    page, page_size = get_pagination(default_size=20)
+    total = query_one(
+        """
+        SELECT COUNT(DISTINCT t.tree_id) AS count
+        FROM family_trees t
+        LEFT JOIN tree_collaborators tc
+          ON tc.tree_id = t.tree_id
+         AND tc.user_id = %s
+        WHERE t.creator_user_id = %s OR tc.user_id = %s
+        """,
+        (user_id, user_id, user_id),
+    )
+    total_count = total["count"] if total else 0
+    page_info = pagination_context(total_count, page, page_size, 0)
+    offset = (page_info["page"] - 1) * page_size
     rows = query_all(
         """
         SELECT
@@ -288,10 +348,12 @@ def trees():
         WHERE t.creator_user_id = %s OR tc.user_id = %s
         GROUP BY t.tree_id, tc.role
         ORDER BY t.created_at DESC, t.tree_id DESC
+        LIMIT %s OFFSET %s
         """,
-        (user_id, user_id, user_id, user_id),
+        (user_id, user_id, user_id, user_id, page_size, offset),
     )
-    return render_template("trees.html", trees=rows)
+    page_info = pagination_context(total_count, int(page_info["page"]), page_size, len(rows))
+    return render_template("trees.html", trees=rows, total=total_count, **page_info)
 
 
 @app.route("/trees/new", methods=("GET", "POST"))
@@ -410,43 +472,43 @@ def members(tree_id: int):
         return redirect(url_for("trees"))
 
     keyword = request.args.get("q", "").strip()
-    params: tuple[Any, ...]
-    if keyword:
-        rows = query_all(
-            """
-            SELECT m.*,
-                   COUNT(pc.child_id) AS child_count
-            FROM members m
-            LEFT JOIN parent_child pc ON pc.parent_id = m.member_id
-            WHERE m.tree_id = %s AND m.name ILIKE %s
-            GROUP BY m.member_id
-            ORDER BY m.generation, m.member_id
-            LIMIT 200
-            """,
-            (tree_id, f"%{keyword}%"),
-        )
-    else:
-        rows = query_all(
-            """
-            SELECT m.*,
-                   COUNT(pc.child_id) AS child_count
-            FROM members m
-            LEFT JOIN parent_child pc ON pc.parent_id = m.member_id
-            WHERE m.tree_id = %s
-            GROUP BY m.member_id
-            ORDER BY m.generation, m.member_id
-            LIMIT 200
-            """,
-            (tree_id,),
-        )
+    page, page_size = get_pagination(default_size=200)
 
-    total = query_one("SELECT COUNT(*) AS count FROM members WHERE tree_id = %s", (tree_id,))
+    where_sql = "m.tree_id = %s"
+    where_params: list[Any] = [tree_id]
+    if keyword:
+        where_sql += " AND m.name ILIKE %s"
+        where_params.append(f"%{keyword}%")
+
+    total = query_one(f"SELECT COUNT(*) AS count FROM members m WHERE {where_sql}", tuple(where_params))
+    total_count = total["count"] if total else 0
+    page_info = pagination_context(total_count, page, page_size, 0)
+    offset = (page_info["page"] - 1) * page_size
+
+    rows = query_all(
+        f"""
+        SELECT m.*,
+               COUNT(pc.child_id) AS child_count
+        FROM members m
+        LEFT JOIN parent_child pc ON pc.parent_id = m.member_id
+        WHERE {where_sql}
+        GROUP BY m.member_id
+        ORDER BY m.generation, m.member_id
+        LIMIT %s OFFSET %s
+        """,
+        tuple(where_params + [page_size, offset]),
+    )
+
+    tree_total = query_one("SELECT COUNT(*) AS count FROM members WHERE tree_id = %s", (tree_id,))
+    page_info = pagination_context(total_count, int(page_info["page"]), page_size, len(rows))
     return render_template(
         "members.html",
         tree=tree,
         members=rows,
         keyword=keyword,
-        total=total["count"] if total else 0,
+        total=tree_total["count"] if tree_total else 0,
+        filtered_total=total_count,
+        **page_info,
     )
 
 
@@ -673,6 +735,7 @@ def tree_preview(tree_id: int):
 
     root_id = parse_int(request.args.get("root_id"), "根成员 ID") if request.args.get("root_id") else None
     depth = min(max(parse_int(request.args.get("depth"), "深度") or 4, 1), 8)
+    page, page_size = get_pagination(default_size=200)
     if root_id is None:
         root = query_one(
             """
@@ -687,9 +750,11 @@ def tree_preview(tree_id: int):
         root_id = root["member_id"] if root else None
 
     rows: list[dict[str, Any]] = []
+    has_next = False
+    start_row = 0
+    end_row = 0
     if root_id:
-        rows = query_all(
-            """
+        descendants_cte = """
             WITH RECURSIVE descendants AS (
                 SELECT
                     m.member_id,
@@ -721,14 +786,35 @@ def tree_preview(tree_id: int):
                   AND descendants.depth < %s
                   AND NOT child.member_id = ANY(descendants.path)
             )
+        """
+        offset = (page - 1) * page_size
+        fetched_rows = query_all(
+            descendants_cte
+            + """
             SELECT *
             FROM descendants
             ORDER BY path
-            LIMIT 300
+            LIMIT %s OFFSET %s
             """,
-            (tree_id, root_id, tree_id, depth),
+            (tree_id, root_id, tree_id, depth, page_size + 1, offset),
         )
-    return render_template("tree_preview.html", tree=tree, rows=rows, root_id=root_id, depth=depth)
+        has_next = len(fetched_rows) > page_size
+        rows = fetched_rows[:page_size]
+        start_row = offset + 1 if rows else 0
+        end_row = offset + len(rows)
+    return render_template(
+        "tree_preview.html",
+        tree=tree,
+        rows=rows,
+        root_id=root_id,
+        depth=depth,
+        page=page,
+        page_size=page_size,
+        page_size_options=PAGE_SIZE_OPTIONS,
+        start_row=start_row,
+        end_row=end_row,
+        has_next=has_next,
+    )
 
 
 @app.route("/trees/<int:tree_id>/ancestors", methods=("GET", "POST"))
@@ -740,13 +826,16 @@ def ancestors(tree_id: int):
         return redirect(url_for("trees"))
 
     member_id = parse_int(request.values.get("member_id"), "成员 ID") if request.values.get("member_id") else None
+    page, page_size = get_pagination(default_size=100)
     rows: list[dict[str, Any]] = []
     target = None
+    has_next = False
+    start_row = 0
+    end_row = 0
     if member_id:
         target = fetch_member(tree_id, member_id)
         if target:
-            rows = query_all(
-                """
+            ancestors_cte = """
                 WITH RECURSIVE ancestors AS (
                     SELECT
                         parent.member_id,
@@ -780,16 +869,36 @@ def ancestors(tree_id: int):
                     WHERE grand_parent.tree_id = %s
                       AND NOT grand_parent.member_id = ANY(ancestors.path)
                 )
+            """
+            offset = (page - 1) * page_size
+            fetched_rows = query_all(
+                ancestors_cte
+                + """
                 SELECT *
                 FROM ancestors
-                ORDER BY distance, generation, member_id
-                LIMIT 300
+                LIMIT %s OFFSET %s
                 """,
-                (member_id, tree_id, tree_id),
+                (member_id, tree_id, tree_id, page_size + 1, offset),
             )
+            has_next = len(fetched_rows) > page_size
+            rows = fetched_rows[:page_size]
+            start_row = offset + 1 if rows else 0
+            end_row = offset + len(rows)
         else:
             flash("成员不存在或不属于当前族谱。", "danger")
-    return render_template("ancestors.html", tree=tree, member_id=member_id, target=target, rows=rows)
+    return render_template(
+        "ancestors.html",
+        tree=tree,
+        member_id=member_id,
+        target=target,
+        rows=rows,
+        page=page,
+        page_size=page_size,
+        page_size_options=PAGE_SIZE_OPTIONS,
+        start_row=start_row,
+        end_row=end_row,
+        has_next=has_next,
+    )
 
 
 @app.route("/trees/<int:tree_id>/relationship", methods=("GET", "POST"))

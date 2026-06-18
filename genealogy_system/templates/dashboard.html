@@ -14,7 +14,39 @@
   <div class="stat"><span>女性</span><strong>{{ stats.female_count or 0 }}</strong></div>
 </div>
 
-<h2>最近族谱</h2>
+<h2>族谱摘要</h2>
+<form method="get" class="filter-form compact-filter">
+  <label>每页显示
+    <select name="page_size">
+      {% for option in page_size_options %}
+        <option value="{{ option }}" {% if option == page_size %}selected{% endif %}>{{ option }} 条</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>页码
+    <input name="page" type="number" min="1" max="{{ total_pages }}" value="{{ page }}">
+  </label>
+  <button type="submit">跳转</button>
+</form>
+
+{% if total_pages > 1 %}
+  <div class="pager">
+    <a href="{{ url_for('dashboard', page_size=page_size, page=1) }}">首页</a>
+    {% if page > 1 %}
+      <a href="{{ url_for('dashboard', page_size=page_size, page=page - 1) }}">上一页</a>
+    {% else %}
+      <span class="muted">上一页</span>
+    {% endif %}
+    <span>第 {{ page }} 页 / 共 {{ total_pages }} 页，{{ start_row }}-{{ end_row }} / {{ tree_count }}</span>
+    {% if page < total_pages %}
+      <a href="{{ url_for('dashboard', page_size=page_size, page=page + 1) }}">下一页</a>
+    {% else %}
+      <span class="muted">下一页</span>
+    {% endif %}
+    <a href="{{ url_for('dashboard', page_size=page_size, page=total_pages) }}">末页</a>
+  </div>
+{% endif %}
+
 <table>
   <thead>
     <tr>

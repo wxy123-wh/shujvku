@@ -2,13 +2,40 @@
 {% block title %}祖先查询{% endblock %}
 {% block content %}
 <h1>{{ tree.tree_name }} 祖先查询</h1>
-<form method="get" class="search-form">
-  <input name="member_id" type="number" value="{{ member_id or '' }}" placeholder="成员 ID" required>
+<form method="get" class="filter-form preview-filter">
+  <label>成员 ID
+    <input name="member_id" type="number" value="{{ member_id or '' }}" placeholder="成员 ID" required>
+  </label>
+  <label>每页显示
+    <select name="page_size">
+      {% for option in page_size_options %}
+        <option value="{{ option }}" {% if option == page_size %}selected{% endif %}>{{ option }} 条</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>页码
+    <input name="page" type="number" min="1" value="{{ page }}">
+  </label>
   <button type="submit">查询祖先</button>
 </form>
 
 {% if target %}
   <h2>目标成员：#{{ target.member_id }} {{ target.name }}</h2>
+  <p class="muted">当前第 {{ page }} 页，本页 {{ start_row }}-{{ end_row }}。</p>
+  <div class="pager">
+    <a href="{{ url_for('ancestors', tree_id=tree.tree_id, member_id=member_id, page_size=page_size, page=1) }}">首页</a>
+    {% if page > 1 %}
+      <a href="{{ url_for('ancestors', tree_id=tree.tree_id, member_id=member_id, page_size=page_size, page=page - 1) }}">上一页</a>
+    {% else %}
+      <span class="muted">上一页</span>
+    {% endif %}
+    <span>第 {{ page }} 页</span>
+    {% if has_next %}
+      <a href="{{ url_for('ancestors', tree_id=tree.tree_id, member_id=member_id, page_size=page_size, page=page + 1) }}">下一页</a>
+    {% else %}
+      <span class="muted">下一页</span>
+    {% endif %}
+  </div>
 {% endif %}
 
 <table>
