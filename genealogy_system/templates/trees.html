@@ -69,6 +69,7 @@
           <a href="{{ url_for('tree_preview', tree_id=tree.tree_id) }}">树形</a>
           <a href="{{ url_for('ancestors', tree_id=tree.tree_id) }}">祖先</a>
           <a href="{{ url_for('relationship', tree_id=tree.tree_id) }}">亲缘</a>
+          <a href="{{ url_for('statistics', tree_id=tree.tree_id) }}">统计</a>
           {% if tree.current_role == "owner" %}
             <form method="post" action="{{ url_for('tree_delete', tree_id=tree.tree_id) }}" onsubmit="return confirm('确定删除该族谱？')">
               <button class="link-button" type="submit">删除</button>

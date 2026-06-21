@@ -305,7 +305,9 @@ def relationship_summary(path_members: list[dict[str, Any]], steps: list[dict[st
     if len(steps) == 1 and steps[0]["kind"] == "spouse":
         return f"{first['name']} 与 {last['name']} 是夫妻关系。"
     if steps and all(step["kind"] == "blood" for step in steps):
-        return f"{first['name']} 与 {last['name']} 存在血缘关系，共经过 {len(steps)} 步。"
+        generation_gap = abs(int(first["generation"]) - int(last["generation"]))
+        gap_text = "同辈" if generation_gap == 0 else f"相差 {generation_gap} 辈"
+        return f"{first['name']} 与 {last['name']} 存在血缘关系，{gap_text}，共经过 {len(steps)} 步。"
     return f"{first['name']} 与 {last['name']} 存在亲缘通路，共经过 {len(steps)} 步。"
 
 
@@ -725,6 +727,257 @@ def save_member_relations(
         )
 
 
+@app.route("/trees/<int:tree_id>/family-query", methods=("GET", "POST"))
+@login_required
+def family_query(tree_id: int):
+    try:
+        tree = require_tree(tree_id)
+    except PermissionError:
+        return redirect(url_for("trees"))
+
+    member_id = parse_int(request.values.get("member_id"), "成员 ID") if request.values.get("member_id") else None
+    target = None
+    rows: list[dict[str, Any]] = []
+
+    if member_id:
+        target = fetch_member(tree_id, member_id)
+        if target:
+            rows = query_all(
+                """
+                SELECT
+                    1 AS relation_order,
+                    'spouse' AS relation_code,
+                    '配偶' AS relation_label,
+                    spouse.member_id,
+                    spouse.name,
+                    spouse.gender,
+                    spouse.birth_year,
+                    spouse.death_year,
+                    spouse.generation,
+                    CASE
+                        WHEN ma.marriage_year IS NULL THEN ''
+                        ELSE '婚年：' || ma.marriage_year::TEXT
+                    END AS detail
+                FROM marriages ma
+                JOIN members spouse
+                  ON spouse.tree_id = ma.tree_id
+                 AND spouse.member_id = CASE
+                     WHEN ma.spouse1_id = %s THEN ma.spouse2_id
+                     ELSE ma.spouse1_id
+                 END
+                WHERE ma.tree_id = %s
+                  AND %s IN (ma.spouse1_id, ma.spouse2_id)
+
+                UNION ALL
+
+                SELECT
+                    2 AS relation_order,
+                    'child' AS relation_code,
+                    CASE WHEN child.gender = 'M' THEN '儿子' ELSE '女儿' END AS relation_label,
+                    child.member_id,
+                    child.name,
+                    child.gender,
+                    child.birth_year,
+                    child.death_year,
+                    child.generation,
+                    CASE
+                        WHEN pc.relation_type = 'father' THEN '父亲记录'
+                        ELSE '母亲记录'
+                    END AS detail
+                FROM parent_child pc
+                JOIN members child
+                  ON child.member_id = pc.child_id
+                 AND child.tree_id = %s
+                WHERE pc.parent_id = %s
+                ORDER BY relation_order, generation, member_id
+                """,
+                (member_id, tree_id, member_id, tree_id, member_id),
+            )
+        else:
+            flash("成员不存在或不属于当前族谱。", "danger")
+
+    return render_template(
+        "family_query.html",
+        tree=tree,
+        member_id=member_id,
+        target=target,
+        rows=rows,
+    )
+
+
+@app.route("/trees/<int:tree_id>/unmarried-men")
+@login_required
+def unmarried_men(tree_id: int):
+    try:
+        tree = require_tree(tree_id)
+    except PermissionError:
+        return redirect(url_for("trees"))
+
+    page, page_size = get_pagination(default_size=100)
+    base_sql = """
+        WITH male_members AS (
+            SELECT
+                m.member_id,
+                m.name,
+                m.gender,
+                m.birth_year,
+                m.death_year,
+                m.generation,
+                CASE
+                    WHEN m.death_year IS NULL THEN
+                        EXTRACT(YEAR FROM AGE(CURRENT_DATE, MAKE_DATE(m.birth_year, 1, 1)))::INT
+                    ELSE m.death_year - m.birth_year
+                END AS age,
+                CASE
+                    WHEN m.death_year IS NULL THEN '年龄'
+                    ELSE '享年'
+                END AS age_label
+            FROM members m
+            WHERE m.tree_id = %s
+              AND m.gender = 'M'
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM marriages ma
+                  WHERE ma.tree_id = m.tree_id
+                    AND (ma.spouse1_id = m.member_id OR ma.spouse2_id = m.member_id)
+              )
+        )
+    """
+    count_row = query_one(
+        base_sql
+        + """
+        SELECT COUNT(*) AS total_count
+        FROM male_members
+        WHERE age > 50
+        """,
+        (tree_id,),
+    )
+    total_count = int(count_row["total_count"] or 0) if count_row else 0
+    page_info = pagination_context(total_count, page, page_size, 0)
+    offset = (int(page_info["page"]) - 1) * page_size
+
+    rows = query_all(
+        base_sql
+        + """
+        SELECT *
+        FROM male_members
+        WHERE age > 50
+        ORDER BY age DESC, generation, member_id
+        LIMIT %s OFFSET %s
+        """,
+        (tree_id, page_size, offset),
+    )
+    page_info = pagination_context(total_count, int(page_info["page"]), page_size, len(rows))
+
+    return render_template(
+        "unmarried_men.html",
+        tree=tree,
+        rows=rows,
+        total_count=total_count,
+        **page_info,
+    )
+
+
+@app.route("/trees/<int:tree_id>/statistics")
+@login_required
+def statistics(tree_id: int):
+    try:
+        tree = require_tree(tree_id)
+    except PermissionError:
+        return redirect(url_for("trees"))
+
+    page, page_size = get_pagination(default_size=100)
+    generation_stats = query_all(
+        """
+        SELECT
+            generation,
+            ROUND(
+                AVG(COALESCE(death_year, EXTRACT(YEAR FROM CURRENT_DATE)::INT) - birth_year),
+                2
+            ) AS avg_lifespan,
+            COUNT(*) AS member_count,
+            COUNT(*) FILTER (WHERE death_year IS NULL) AS living_count,
+            MIN(birth_year) AS earliest_birth_year,
+            MAX(birth_year) AS latest_birth_year
+        FROM members
+        WHERE tree_id = %s
+          AND birth_year IS NOT NULL
+        GROUP BY generation
+        ORDER BY avg_lifespan DESC, generation
+        """,
+        (tree_id,),
+    )
+    top_generation = generation_stats[0] if generation_stats else None
+
+    early_birth_cte = """
+        WITH generation_avg AS (
+            SELECT
+                tree_id,
+                generation,
+                AVG(birth_year) AS avg_birth_year,
+                COUNT(*) AS generation_member_count
+            FROM members
+            WHERE tree_id = %s
+              AND birth_year IS NOT NULL
+            GROUP BY tree_id, generation
+        ),
+        early_birth_members AS (
+            SELECT
+                m.member_id,
+                m.name,
+                m.gender,
+                m.birth_year,
+                m.death_year,
+                m.generation,
+                ROUND(g.avg_birth_year, 2) AS generation_avg_birth_year,
+                ROUND(g.avg_birth_year - m.birth_year, 2) AS years_before_avg,
+                g.generation_member_count
+            FROM members m
+            JOIN generation_avg g
+              ON g.tree_id = m.tree_id
+             AND g.generation = m.generation
+            WHERE m.tree_id = %s
+              AND m.birth_year < g.avg_birth_year
+        )
+    """
+    early_birth_total_row = query_one(
+        early_birth_cte
+        + """
+        SELECT COUNT(*) AS count
+        FROM early_birth_members
+        """,
+        (tree_id, tree_id),
+    )
+    early_birth_total = int(early_birth_total_row["count"] or 0) if early_birth_total_row else 0
+    early_birth_page_info = pagination_context(early_birth_total, page, page_size, 0)
+    offset = (int(early_birth_page_info["page"]) - 1) * page_size
+    early_birth_members = query_all(
+        early_birth_cte
+        + """
+        SELECT *
+        FROM early_birth_members
+        ORDER BY generation, birth_year, member_id
+        LIMIT %s OFFSET %s
+        """,
+        (tree_id, tree_id, page_size, offset),
+    )
+    early_birth_page_info = pagination_context(
+        early_birth_total,
+        int(early_birth_page_info["page"]),
+        page_size,
+        len(early_birth_members),
+    )
+    return render_template(
+        "statistics.html",
+        tree=tree,
+        top_generation=top_generation,
+        generation_stats=generation_stats,
+        early_birth_members=early_birth_members,
+        early_birth_total=early_birth_total,
+        early_birth_pagination=early_birth_page_info,
+    )
+
+
 @app.route("/trees/<int:tree_id>/members/new", methods=("GET", "POST"))
 @login_required
 def member_new(tree_id: int):
@@ -958,56 +1211,136 @@ def ancestors(tree_id: int):
     has_next = False
     start_row = 0
     end_row = 0
+    total_count = 0
     if member_id:
         target = fetch_member(tree_id, member_id)
         if target:
+            target_generation = int(target["generation"])
             ancestors_cte = """
-                WITH RECURSIVE ancestors AS (
+                WITH RECURSIVE
+                ancestor_steps AS (
                     SELECT
-                        parent.member_id,
-                        parent.name,
-                        parent.gender,
-                        parent.birth_year,
-                        parent.death_year,
-                        parent.generation,
-                        pc.relation_type,
-                        1 AS distance,
-                        ARRAY[parent.member_id] AS path
+                        pc.parent_id AS member_id,
+                        1 AS distance
                     FROM parent_child pc
                     JOIN members parent ON parent.member_id = pc.parent_id
-                    WHERE pc.child_id = %s AND parent.tree_id = %s
+                    WHERE pc.child_id = %s
+                      AND parent.tree_id = %s
+                      AND parent.generation < %s
 
-                    UNION ALL
+                    UNION
 
                     SELECT
-                        grand_parent.member_id,
-                        grand_parent.name,
-                        grand_parent.gender,
-                        grand_parent.birth_year,
-                        grand_parent.death_year,
-                        grand_parent.generation,
-                        pc.relation_type,
-                        ancestors.distance + 1,
-                        ancestors.path || grand_parent.member_id
-                    FROM ancestors
-                    JOIN parent_child pc ON pc.child_id = ancestors.member_id
-                    JOIN members grand_parent ON grand_parent.member_id = pc.parent_id
-                    WHERE grand_parent.tree_id = %s
-                      AND NOT grand_parent.member_id = ANY(ancestors.path)
+                        pc.parent_id AS member_id,
+                        ancestor_steps.distance + 1 AS distance
+                    FROM ancestor_steps
+                    JOIN members current_member
+                      ON current_member.member_id = ancestor_steps.member_id
+                    JOIN parent_child pc ON pc.child_id = ancestor_steps.member_id
+                    JOIN members parent ON parent.member_id = pc.parent_id
+                    WHERE current_member.tree_id = %s
+                      AND parent.tree_id = %s
+                      AND parent.generation < current_member.generation
+                ),
+                ancestor_branches AS (
+                    SELECT
+                        pc.parent_id AS member_id,
+                        pc.relation_type AS root_relation_type
+                    FROM parent_child pc
+                    JOIN members parent ON parent.member_id = pc.parent_id
+                    WHERE pc.child_id = %s
+                      AND parent.tree_id = %s
+                      AND parent.generation < %s
+
+                    UNION
+
+                    SELECT
+                        pc.parent_id AS member_id,
+                        ancestor_branches.root_relation_type
+                    FROM ancestor_branches
+                    JOIN members current_member
+                      ON current_member.member_id = ancestor_branches.member_id
+                    JOIN parent_child pc ON pc.child_id = ancestor_branches.member_id
+                    JOIN members parent ON parent.member_id = pc.parent_id
+                    WHERE current_member.tree_id = %s
+                      AND parent.tree_id = %s
+                      AND parent.generation < current_member.generation
+                ),
+                shortest AS (
+                    SELECT member_id, MIN(distance) AS distance
+                    FROM ancestor_steps
+                    GROUP BY member_id
+                ),
+                branches AS (
+                    SELECT
+                        member_id,
+                        BOOL_OR(root_relation_type = 'father') AS via_father,
+                        BOOL_OR(root_relation_type = 'mother') AS via_mother
+                    FROM ancestor_branches
+                    GROUP BY member_id
+                ),
+                unique_ancestors AS (
+                    SELECT
+                        m.member_id,
+                        m.name,
+                        m.gender,
+                        m.birth_year,
+                        m.death_year,
+                        m.generation,
+                        shortest.distance,
+                        GREATEST(%s - m.generation, 0) AS generation_gap,
+                        CASE
+                            WHEN COALESCE(branches.via_father, FALSE)
+                             AND COALESCE(branches.via_mother, FALSE) THEN '父系/母系'
+                            WHEN COALESCE(branches.via_father, FALSE) THEN '父系'
+                            WHEN COALESCE(branches.via_mother, FALSE) THEN '母系'
+                            ELSE '未知'
+                        END AS lineage_label
+                    FROM shortest
+                    JOIN members m
+                      ON m.member_id = shortest.member_id
+                     AND m.tree_id = %s
+                    LEFT JOIN branches ON branches.member_id = shortest.member_id
                 )
             """
             offset = (page - 1) * page_size
+            cte_params = (
+                member_id,
+                tree_id,
+                target_generation,
+                tree_id,
+                tree_id,
+                member_id,
+                tree_id,
+                target_generation,
+                tree_id,
+                tree_id,
+                target_generation,
+                tree_id,
+            )
             fetched_rows = query_all(
                 ancestors_cte
                 + """
-                SELECT *
-                FROM ancestors
+                SELECT *, COUNT(*) OVER() AS total_count
+                FROM unique_ancestors
+                ORDER BY distance, generation DESC, member_id
                 LIMIT %s OFFSET %s
                 """,
-                (member_id, tree_id, tree_id, page_size + 1, offset),
+                cte_params + (page_size, offset),
             )
-            has_next = len(fetched_rows) > page_size
-            rows = fetched_rows[:page_size]
+            rows = fetched_rows
+            total_count = int(rows[0]["total_count"]) if rows else 0
+            if not rows and page > 1:
+                count_row = query_one(
+                    ancestors_cte
+                    + """
+                    SELECT COUNT(*) AS total_count
+                    FROM unique_ancestors
+                    """,
+                    cte_params,
+                )
+                total_count = int(count_row["total_count"] or 0) if count_row else 0
+            has_next = offset + len(rows) < total_count
             start_row = offset + 1 if rows else 0
             end_row = offset + len(rows)
         else:
@@ -1023,6 +1356,7 @@ def ancestors(tree_id: int):
         page_size_options=PAGE_SIZE_OPTIONS,
         start_row=start_row,
         end_row=end_row,
+        total_count=total_count,
         has_next=has_next,
     )
 
@@ -1040,6 +1374,7 @@ def relationship(tree_id: int):
     result = None
     path_members: list[dict[str, Any]] = []
     relationship_steps: list[dict[str, Any]] = []
+    relationship_detail: dict[str, Any] | None = None
     summary = ""
     no_relationship_message = ""
     target_a = fetch_member(tree_id, member_a_id) if member_a_id else None
@@ -1056,7 +1391,11 @@ def relationship(tree_id: int):
                     SELECT
                         ARRAY[%s::BIGINT, %s::BIGINT] AS path,
                         ARRAY['spouse']::TEXT[] AS edge_labels,
-                        1 AS depth
+                        1 AS depth,
+                        'spouse'::TEXT AS relation_kind,
+                        NULL::BIGINT AS common_ancestor_id,
+                        NULL::INT AS distance_from_a,
+                        NULL::INT AS distance_from_b
                     FROM marriages ma
                     WHERE ma.tree_id = %s
                       AND ma.spouse1_id = LEAST(%s::BIGINT, %s::BIGINT)
@@ -1108,14 +1447,25 @@ def relationship(tree_id: int):
                             FROM unnest(up_from_b.path[1:GREATEST(cardinality(up_from_b.path) - 1, 0)]) WITH ORDINALITY AS path_item(item, ord)
                             ORDER BY ord DESC
                         ) AS path,
-                        up_from_a.depth + up_from_b.depth AS depth
+                        up_from_a.depth + up_from_b.depth AS depth,
+                        'blood'::TEXT AS relation_kind,
+                        up_from_a.current_id AS common_ancestor_id,
+                        up_from_a.depth AS distance_from_a,
+                        up_from_b.depth AS distance_from_b
                     FROM up_from_a
                     JOIN up_from_b ON up_from_b.current_id = up_from_a.current_id
                     ORDER BY up_from_a.depth + up_from_b.depth
                     LIMIT 1
                 ),
                 best_path AS (
-                    SELECT path, edge_labels, depth
+                    SELECT
+                        path,
+                        edge_labels,
+                        depth,
+                        relation_kind,
+                        common_ancestor_id,
+                        distance_from_a,
+                        distance_from_b
                     FROM direct_spouse
 
                     UNION ALL
@@ -1123,13 +1473,21 @@ def relationship(tree_id: int):
                     SELECT
                         path,
                         array_fill('blood relation'::TEXT, ARRAY[GREATEST(depth, 0)]) AS edge_labels,
-                        depth
+                        depth,
+                        relation_kind,
+                        common_ancestor_id,
+                        distance_from_a,
+                        distance_from_b
                     FROM blood_path
                 )
                 SELECT
                     path,
                     edge_labels,
-                    depth
+                    depth,
+                    relation_kind,
+                    common_ancestor_id,
+                    distance_from_a,
+                    distance_from_b
                 FROM best_path
                 ORDER BY depth
                 LIMIT 1
@@ -1165,6 +1523,44 @@ def relationship(tree_id: int):
                 path_members = [member_map[item] for item in result["path"] if item in member_map]
                 relationship_steps = describe_relationship_steps(tree_id, path_members)
                 summary = relationship_summary(path_members, relationship_steps)
+                generation_gap = abs(int(target_a["generation"]) - int(target_b["generation"]))
+                relationship_detail = {
+                    "relation_kind": result["relation_kind"],
+                    "generation_gap": generation_gap,
+                    "member_a_generation": target_a["generation"],
+                    "member_b_generation": target_b["generation"],
+                }
+                if result["relation_kind"] == "blood":
+                    distance_from_a = int(result.get("distance_from_a") or 0)
+                    distance_from_b = int(result.get("distance_from_b") or 0)
+                    common_ancestor = member_map.get(result.get("common_ancestor_id"))
+                    if distance_from_a == 0 and distance_from_b == 0:
+                        detail_text = "两个 ID 指向同一名成员。"
+                    elif distance_from_a == 0:
+                        detail_text = f"A 是 B 的祖先，B 向上追溯 {distance_from_b} 代到达 A。"
+                    elif distance_from_b == 0:
+                        detail_text = f"B 是 A 的祖先，A 向上追溯 {distance_from_a} 代到达 B。"
+                    else:
+                        ancestor_text = (
+                            f"#{common_ancestor['member_id']} {common_ancestor['name']}"
+                            if common_ancestor
+                            else "共同祖先"
+                        )
+                        detail_text = (
+                            f"A 向上追溯 {distance_from_a} 代、B 向上追溯 {distance_from_b} "
+                            f"代到达 {ancestor_text}。"
+                        )
+                    relationship_detail.update(
+                        {
+                            "common_ancestor": common_ancestor,
+                            "distance_from_a": distance_from_a,
+                            "distance_from_b": distance_from_b,
+                            "description": detail_text,
+                        }
+                    )
+                else:
+                    generation_text = "同辈" if generation_gap == 0 else f"相差 {generation_gap} 辈"
+                    relationship_detail["description"] = f"两人是直接配偶关系，辈分{generation_text}。"
             else:
                 no_relationship_message = f"未找到直接配偶关系，也没有在 {RELATION_ANCESTOR_DEPTH} 代追溯范围内找到共同祖先血缘通路。"
                 flash(no_relationship_message, "warning")
@@ -1179,6 +1575,7 @@ def relationship(tree_id: int):
         result=result,
         path_members=path_members,
         relationship_steps=relationship_steps,
+        relationship_detail=relationship_detail,
         relationship_summary=summary,
         no_relationship_message=no_relationship_message,
     )

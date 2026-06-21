@@ -88,7 +88,12 @@ def main() -> None:
     for key, count in marriage_pairs.items():
         if count > 1:
             errors.append(f"duplicate marriage pair: {key}")
+    marriage_pair_set = {
+        (int(row["tree_id"]), int(row["spouse1_id"]), int(row["spouse2_id"]))
+        for row in marriages
+    }
 
+    marriage_count_by_member: Counter[int] = Counter()
     for row in marriages:
         spouse1 = member_map.get(int(row["spouse1_id"]))
         spouse2 = member_map.get(int(row["spouse2_id"]))
@@ -101,10 +106,29 @@ def main() -> None:
             errors.append(f"marriage tree mismatch: {row}")
         spouse1_id = int(row["spouse1_id"])
         spouse2_id = int(row["spouse2_id"])
+        marriage_count_by_member[spouse1_id] += 1
+        marriage_count_by_member[spouse2_id] += 1
         if (spouse1_id, spouse2_id) in parent_child_pairs or (spouse2_id, spouse1_id) in parent_child_pairs:
             errors.append(f"marriage between parent and child: {row}")
         if parents_by_child.get(spouse1_id, set()) & parents_by_child.get(spouse2_id, set()):
             errors.append(f"marriage between siblings or half-siblings: {row}")
+
+    for spouse_id, count in marriage_count_by_member.items():
+        if count > 1:
+            errors.append(f"member has multiple spouses in seed data: {spouse_id}")
+
+    parent_type_by_child_id: dict[int, dict[str, int]] = {}
+    for row in parent_child:
+        parent_type_by_child_id.setdefault(int(row["child_id"]), {})[row["relation_type"]] = int(row["parent_id"])
+    for child_id, parents in parent_type_by_child_id.items():
+        father_id = parents.get("father")
+        mother_id = parents.get("mother")
+        child = member_map.get(child_id)
+        if father_id is not None and mother_id is not None and child:
+            spouse1_id, spouse2_id = sorted((father_id, mother_id))
+            pair_key = (int(child["tree_id"]), spouse1_id, spouse2_id)
+            if pair_key not in marriage_pair_set:
+                errors.append(f"child parents are not married in seed data: {child_id}")
 
     by_tree = Counter(int(row["tree_id"]) for row in members)
     max_generation = {}

@@ -21,7 +21,7 @@
 
 {% if target %}
   <h2>目标成员：#{{ target.member_id }} {{ target.name }}</h2>
-  <p class="muted">当前第 {{ page }} 页，本页 {{ start_row }}-{{ end_row }}。</p>
+  <p class="muted">唯一祖先共 {{ total_count }} 位；当前第 {{ page }} 页，本页 {{ start_row }}-{{ end_row }}。</p>
   <div class="pager">
     <a href="{{ url_for('ancestors', tree_id=tree.tree_id, member_id=member_id, page_size=page_size, page=1) }}">首页</a>
     {% if page > 1 %}
@@ -41,10 +41,12 @@
 <table>
   <thead>
     <tr>
-      <th>距离</th>
+      <th>最近上溯</th>
+      <th>辈分差</th>
       <th>ID</th>
       <th>姓名</th>
-      <th>关系</th>
+      <th>来源</th>
+      <th>祖先类型</th>
       <th>性别</th>
       <th>生卒年</th>
       <th>辈分</th>
@@ -53,16 +55,24 @@
   <tbody>
     {% for row in rows %}
       <tr>
-        <td>{{ row.distance }}</td>
+        <td>{{ row.distance }} 代</td>
+        <td>{{ row.generation_gap }} 辈</td>
         <td>{{ row.member_id }}</td>
         <td>{{ row.name }}</td>
-        <td>{{ "父亲" if row.relation_type == "father" else "母亲" }}</td>
+        <td>{{ row.lineage_label }}</td>
+        <td>
+          {% if row.distance == 1 %}
+            {{ "父亲" if row.gender == "M" else "母亲" }}
+          {% else %}
+            {{ "男性祖先" if row.gender == "M" else "女性祖先" }}
+          {% endif %}
+        </td>
         <td>{{ "男" if row.gender == "M" else "女" }}</td>
         <td>{{ row.birth_year }}{% if row.death_year %}-{{ row.death_year }}{% endif %}</td>
         <td>{{ row.generation }}</td>
       </tr>
     {% else %}
-      <tr><td colspan="7" class="empty">暂无祖先查询结果</td></tr>
+      <tr><td colspan="9" class="empty">暂无祖先查询结果</td></tr>
     {% endfor %}
   </tbody>
 </table>

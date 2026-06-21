@@ -66,7 +66,10 @@
         <td>{{ tree.surname }}</td>
         <td>{{ tree.current_role }}</td>
         <td>{{ tree.member_count }}</td>
-        <td><a href="{{ url_for('members', tree_id=tree.tree_id) }}">成员</a></td>
+        <td class="actions">
+          <a href="{{ url_for('members', tree_id=tree.tree_id) }}">成员</a>
+          <a href="{{ url_for('statistics', tree_id=tree.tree_id) }}">统计</a>
+        </td>
       </tr>
     {% else %}
       <tr><td colspan="6" class="empty">暂无族谱</td></tr>

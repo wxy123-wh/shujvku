@@ -324,6 +324,30 @@ th {
   font-weight: 700;
 }
 
+.relationship-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.meta-item {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.meta-item span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.meta-item strong {
+  overflow-wrap: anywhere;
+}
+
 .path-diagram {
   display: flex;
   align-items: stretch;

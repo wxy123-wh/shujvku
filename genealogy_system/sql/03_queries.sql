@@ -35,42 +35,87 @@ JOIN members child ON child.member_id = pc.child_id
 WHERE pc.parent_id = :member_id
 ORDER BY relation, generation, member_id;
 
--- 2. Recursive CTE: given member A, trace all ancestors upward.
-WITH RECURSIVE ancestors AS (
+-- 2. Recursive CTE: given member A, trace all unique ancestors upward.
+WITH RECURSIVE
+target_member AS (
+    SELECT member_id, generation
+    FROM members
+    WHERE member_id = :member_id
+),
+ancestor_steps AS (
     SELECT
-        parent.member_id,
-        parent.name,
-        parent.gender,
-        parent.birth_year,
-        parent.death_year,
-        parent.generation,
-        pc.relation_type,
-        1 AS distance,
-        ARRAY[parent.member_id] AS path
+        pc.parent_id AS member_id,
+        1 AS distance
     FROM parent_child pc
     JOIN members parent ON parent.member_id = pc.parent_id
-    WHERE pc.child_id = :member_id
+    JOIN target_member target ON target.member_id = pc.child_id
+    WHERE parent.generation < target.generation
 
-    UNION ALL
+    UNION
 
     SELECT
-        grand_parent.member_id,
-        grand_parent.name,
-        grand_parent.gender,
-        grand_parent.birth_year,
-        grand_parent.death_year,
-        grand_parent.generation,
-        pc.relation_type,
-        ancestors.distance + 1,
-        ancestors.path || grand_parent.member_id
-    FROM ancestors
-    JOIN parent_child pc ON pc.child_id = ancestors.member_id
-    JOIN members grand_parent ON grand_parent.member_id = pc.parent_id
-    WHERE NOT grand_parent.member_id = ANY(ancestors.path)
+        pc.parent_id AS member_id,
+        ancestor_steps.distance + 1 AS distance
+    FROM ancestor_steps
+    JOIN members current_member ON current_member.member_id = ancestor_steps.member_id
+    JOIN parent_child pc ON pc.child_id = ancestor_steps.member_id
+    JOIN members parent ON parent.member_id = pc.parent_id
+    WHERE parent.generation < current_member.generation
+),
+ancestor_branches AS (
+    SELECT
+        pc.parent_id AS member_id,
+        pc.relation_type AS root_relation_type
+    FROM parent_child pc
+    JOIN members parent ON parent.member_id = pc.parent_id
+    JOIN target_member target ON target.member_id = pc.child_id
+    WHERE parent.generation < target.generation
+
+    UNION
+
+    SELECT
+        pc.parent_id AS member_id,
+        ancestor_branches.root_relation_type
+    FROM ancestor_branches
+    JOIN members current_member ON current_member.member_id = ancestor_branches.member_id
+    JOIN parent_child pc ON pc.child_id = ancestor_branches.member_id
+    JOIN members parent ON parent.member_id = pc.parent_id
+    WHERE parent.generation < current_member.generation
+),
+shortest AS (
+    SELECT member_id, MIN(distance) AS distance
+    FROM ancestor_steps
+    GROUP BY member_id
+),
+branches AS (
+    SELECT
+        member_id,
+        BOOL_OR(root_relation_type = 'father') AS via_father,
+        BOOL_OR(root_relation_type = 'mother') AS via_mother
+    FROM ancestor_branches
+    GROUP BY member_id
 )
-SELECT *
-FROM ancestors
-ORDER BY distance, generation, member_id;
+SELECT
+    m.member_id,
+    m.name,
+    m.gender,
+    m.birth_year,
+    m.death_year,
+    m.generation,
+    shortest.distance,
+    GREATEST(target.generation - m.generation, 0) AS generation_gap,
+    CASE
+        WHEN COALESCE(branches.via_father, FALSE)
+         AND COALESCE(branches.via_mother, FALSE) THEN '父系/母系'
+        WHEN COALESCE(branches.via_father, FALSE) THEN '父系'
+        WHEN COALESCE(branches.via_mother, FALSE) THEN '母系'
+        ELSE '未知'
+    END AS lineage_label
+FROM shortest
+JOIN members m ON m.member_id = shortest.member_id
+CROSS JOIN target_member target
+LEFT JOIN branches ON branches.member_id = shortest.member_id
+ORDER BY shortest.distance, m.generation DESC, m.member_id;
 
 -- 3. Find the generation with the longest average lifespan in a family tree.
 SELECT
@@ -85,23 +130,43 @@ ORDER BY avg_lifespan DESC, generation
 LIMIT 1;
 
 -- 4. Male members older than 50 who have no spouse.
+WITH male_members AS (
+    SELECT
+        m.member_id,
+        m.name,
+        m.birth_year,
+        m.death_year,
+        CASE
+            WHEN m.death_year IS NULL THEN
+                EXTRACT(YEAR FROM AGE(CURRENT_DATE, MAKE_DATE(m.birth_year, 1, 1)))::INT
+            ELSE m.death_year - m.birth_year
+        END AS age,
+        CASE
+            WHEN m.death_year IS NULL THEN '年龄'
+            ELSE '享年'
+        END AS age_label,
+        m.generation
+    FROM members m
+    WHERE m.tree_id = :tree_id
+      AND m.gender = 'M'
+      AND NOT EXISTS (
+          SELECT 1
+          FROM marriages ma
+          WHERE ma.tree_id = m.tree_id
+            AND (ma.spouse1_id = m.member_id OR ma.spouse2_id = m.member_id)
+      )
+)
 SELECT
-    m.member_id,
-    m.name,
-    m.birth_year,
-    EXTRACT(YEAR FROM CURRENT_DATE)::INT - m.birth_year AS age,
-    m.generation
-FROM members m
-WHERE m.tree_id = :tree_id
-  AND m.gender = 'M'
-  AND EXTRACT(YEAR FROM CURRENT_DATE)::INT - m.birth_year > 50
-  AND NOT EXISTS (
-      SELECT 1
-      FROM marriages ma
-      WHERE ma.spouse1_id = m.member_id
-         OR ma.spouse2_id = m.member_id
-  )
-ORDER BY age DESC, m.member_id
+    member_id,
+    name,
+    birth_year,
+    death_year,
+    age,
+    age_label,
+    generation
+FROM male_members
+WHERE age > 50
+ORDER BY age DESC, generation, member_id
 LIMIT 100;
 
 -- 5. Members born earlier than the average birth year of their generation.

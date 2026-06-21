@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}50 岁以上无配偶男性{% endblock %}
+{% block content %}
+<h1>{{ tree.tree_name }} 50 岁以上无配偶男性</h1>
+
+<form method="get" class="filter-form compact-filter">
+  <label>每页显示
+    <select name="page_size">
+      {% for option in page_size_options %}
+        <option value="{{ option }}" {% if option == page_size %}selected{% endif %}>{{ option }} 条</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>页码
+    <input name="page" type="number" min="1" max="{{ total_pages }}" value="{{ page }}">
+  </label>
+  <button type="submit">跳转</button>
+</form>
+
+<p class="muted">
+  共 {{ total_count }} 位；在世成员显示当前年龄，已故成员显示享年。当前第 {{ page }} / {{ total_pages }} 页，本页 {{ start_row }}-{{ end_row }}。
+</p>
+
+{% if total_pages > 1 %}
+  <div class="pager">
+    <a href="{{ url_for('unmarried_men', tree_id=tree.tree_id, page_size=page_size, page=1) }}">首页</a>
+    {% if page > 1 %}
+      <a href="{{ url_for('unmarried_men', tree_id=tree.tree_id, page_size=page_size, page=page - 1) }}">上一页</a>
+    {% else %}
+      <span class="muted">上一页</span>
+    {% endif %}
+    <span>第 {{ page }} 页 / 共 {{ total_pages }} 页</span>
+    {% if page < total_pages %}
+      <a href="{{ url_for('unmarried_men', tree_id=tree.tree_id, page_size=page_size, page=page + 1) }}">下一页</a>
+    {% else %}
+      <span class="muted">下一页</span>
+    {% endif %}
+    <a href="{{ url_for('unmarried_men', tree_id=tree.tree_id, page_size=page_size, page=total_pages) }}">末页</a>
+  </div>
+{% endif %}
+
+<table>
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>姓名</th>
+      <th>年龄/享年</th>
+      <th>生卒年</th>
+      <th>辈分</th>
+      <th>操作</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for member in rows %}
+      <tr>
+        <td>{{ member.member_id }}</td>
+        <td>{{ member.name }}</td>
+        <td>{{ member.age_label }} {{ member.age }}</td>
+        <td>{{ member.birth_year }}{% if member.death_year %}-{{ member.death_year }}{% endif %}</td>
+        <td>{{ member.generation }}</td>
+        <td class="actions">
+          <a href="{{ url_for('ancestors', tree_id=tree.tree_id, member_id=member.member_id) }}">祖先</a>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="empty">暂无符合条件的成员</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}统计分析{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div>
+    <h1>{{ tree.tree_name }} 统计分析</h1>
+    <p class="muted">现存成员按当前年份折算年龄；无出生年份的成员不纳入平均寿命统计。</p>
+  </div>
+  <a class="button" href="{{ url_for('members', tree_id=tree.tree_id) }}">返回成员</a>
+</div>
+
+<div class="subnav">
+  <a href="{{ url_for('tree_preview', tree_id=tree.tree_id) }}">树形预览</a>
+  <a href="{{ url_for('family_query', tree_id=tree.tree_id) }}">配偶及子女查询</a>
+  <a href="{{ url_for('ancestors', tree_id=tree.tree_id) }}">祖先查询</a>
+  <a href="{{ url_for('relationship', tree_id=tree.tree_id) }}">亲缘查询</a>
+  <a href="{{ url_for('statistics', tree_id=tree.tree_id) }}">统计分析</a>
+</div>
+
+{% if top_generation %}
+  <div class="relationship-meta">
+    <div class="meta-item">
+      <span>平均寿命最长辈分</span>
+      <strong>第 {{ top_generation.generation }} 代</strong>
+    </div>
+    <div class="meta-item">
+      <span>平均寿命</span>
+      <strong>{{ top_generation.avg_lifespan }} 年</strong>
+    </div>
+    <div class="meta-item">
+      <span>统计人数</span>
+      <strong>{{ top_generation.member_count }} 人</strong>
+    </div>
+    <div class="meta-item">
+      <span>现存成员</span>
+      <strong>{{ top_generation.living_count }} 人</strong>
+    </div>
+  </div>
+{% else %}
+  <p class="empty">暂无可用于寿命统计的成员数据。</p>
+{% endif %}
+
+<h2>各辈分平均寿命排名</h2>
+<table>
+  <thead>
+    <tr>
+      <th>排名</th>
+      <th>辈分</th>
+      <th>平均寿命</th>
+      <th>统计人数</th>
+      <th>现存成员</th>
+      <th>出生年份范围</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in generation_stats %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>第 {{ row.generation }} 代</td>
+        <td>{{ row.avg_lifespan }} 年</td>
+        <td>{{ row.member_count }}</td>
+        <td>{{ row.living_count }}</td>
+        <td>{{ row.earliest_birth_year }}-{{ row.latest_birth_year }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="empty">暂无统计结果</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2>早于同辈平均出生年份的成员</h2>
+<p class="muted">
+  共 {{ early_birth_total }} 位成员；当前第 {{ early_birth_pagination.page }} / {{ early_birth_pagination.total_pages }} 页，
+  本页 {{ early_birth_pagination.start_row }}-{{ early_birth_pagination.end_row }}。
+</p>
+<form method="get" class="filter-form compact-filter">
+  <label>每页显示
+    <select name="page_size">
+      {% for option in early_birth_pagination.page_size_options %}
+        <option value="{{ option }}" {% if option == early_birth_pagination.page_size %}selected{% endif %}>{{ option }} 条</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>页码
+    <input name="page" type="number" min="1" max="{{ early_birth_pagination.total_pages }}" value="{{ early_birth_pagination.page }}">
+  </label>
+  <button type="submit">跳转</button>
+</form>
+
+{% if early_birth_pagination.total_pages > 1 %}
+  <div class="pager">
+    <a href="{{ url_for('statistics', tree_id=tree.tree_id, page_size=early_birth_pagination.page_size, page=1) }}">首页</a>
+    {% if early_birth_pagination.page > 1 %}
+      <a href="{{ url_for('statistics', tree_id=tree.tree_id, page_size=early_birth_pagination.page_size, page=early_birth_pagination.page - 1) }}">上一页</a>
+    {% else %}
+      <span class="muted">上一页</span>
+    {% endif %}
+    <span>第 {{ early_birth_pagination.page }} 页 / 共 {{ early_birth_pagination.total_pages }} 页</span>
+    {% if early_birth_pagination.page < early_birth_pagination.total_pages %}
+      <a href="{{ url_for('statistics', tree_id=tree.tree_id, page_size=early_birth_pagination.page_size, page=early_birth_pagination.page + 1) }}">下一页</a>
+    {% else %}
+      <span class="muted">下一页</span>
+    {% endif %}
+    <a href="{{ url_for('statistics', tree_id=tree.tree_id, page_size=early_birth_pagination.page_size, page=early_birth_pagination.total_pages) }}">末页</a>
+  </div>
+{% endif %}
+
+<table>
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>姓名</th>
+      <th>性别</th>
+      <th>辈分</th>
+      <th>生卒年</th>
+      <th>同辈平均生年</th>
+      <th>早于平均</th>
+      <th>同辈人数</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for member in early_birth_members %}
+      <tr>
+        <td>{{ member.member_id }}</td>
+        <td>{{ member.name }}</td>
+        <td>{{ "男" if member.gender == "M" else "女" }}</td>
+        <td>第 {{ member.generation }} 代</td>
+        <td>{{ member.birth_year }}{% if member.death_year %}-{{ member.death_year }}{% endif %}</td>
+        <td>{{ member.generation_avg_birth_year }}</td>
+        <td>{{ member.years_before_avg }} 年</td>
+        <td>{{ member.generation_member_count }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="8" class="empty">暂无早于同辈平均出生年份的成员</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

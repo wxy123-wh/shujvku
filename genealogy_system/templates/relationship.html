@@ -20,6 +20,44 @@
       <span class="muted">最短通路：{{ result.depth }} 步</span>
     </div>
 
+    {% if relationship_detail %}
+      <div class="relationship-meta">
+        <div class="meta-item">
+          <span>成员 A 辈分</span>
+          <strong>第 {{ relationship_detail.member_a_generation }} 代</strong>
+        </div>
+        <div class="meta-item">
+          <span>成员 B 辈分</span>
+          <strong>第 {{ relationship_detail.member_b_generation }} 代</strong>
+        </div>
+        <div class="meta-item">
+          <span>辈分差</span>
+          <strong>{{ relationship_detail.generation_gap }} 辈</strong>
+        </div>
+        {% if relationship_detail.relation_kind == "blood" %}
+          <div class="meta-item">
+            <span>A 上溯</span>
+            <strong>{{ relationship_detail.distance_from_a }} 代</strong>
+          </div>
+          <div class="meta-item">
+            <span>B 上溯</span>
+            <strong>{{ relationship_detail.distance_from_b }} 代</strong>
+          </div>
+          <div class="meta-item">
+            <span>共同祖先</span>
+            <strong>
+              {% if relationship_detail.common_ancestor %}
+                #{{ relationship_detail.common_ancestor.member_id }} {{ relationship_detail.common_ancestor.name }}
+              {% else %}
+                未识别
+              {% endif %}
+            </strong>
+          </div>
+        {% endif %}
+      </div>
+      <p class="muted">{{ relationship_detail.description }}</p>
+    {% endif %}
+
     {% if relationship_steps %}
       <div class="path-diagram">
         {% for step in relationship_steps %}
